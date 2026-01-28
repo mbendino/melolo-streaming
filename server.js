@@ -12,13 +12,34 @@ const API_URL = 'https://captain.sapimu.au/melolo/api/v1'
 const TOKEN = process.env.AUTH_TOKEN || '61b1a024457f073e6d6b480de88aed5c135c8e7c5baf85d8a234c2fa75f380ed'
 const HEADERS = { Authorization: `Bearer ${TOKEN}`, 'User-Agent': 'Mozilla/5.0' }
 
+async function fetchImg(url) {
+  if (!url) return null
+  try {
+    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
+    const buffer = Buffer.from(await r.arrayBuffer())
+    if (url.includes('.heic')) {
+      const tmp = `/tmp/img_${Date.now()}_${Math.random().toString(36).slice(2)}`
+      writeFileSync(`${tmp}.heic`, buffer)
+      execSync(`convert ${tmp}.heic ${tmp}.jpg`)
+      const jpg = readFileSync(`${tmp}.jpg`)
+      unlinkSync(`${tmp}.heic`)
+      unlinkSync(`${tmp}.jpg`)
+      return `data:image/jpeg;base64,${jpg.toString('base64')}`
+    }
+    return `data:image/jpeg;base64,${buffer.toString('base64')}`
+  } catch { return null }
+}
+
 app.get('/api/foryou', async (req, res) => {
   const { lang = 'id', page = '1' } = req.query
   try {
     const r = await fetch(`${API_URL}/bookmall?lang=${lang}&page=${page}`, { headers: HEADERS })
     const json = await r.json()
     const books = json.cell?.books || []
-    res.json({ data: books.map(i => ({ id: i.book_id, title: i.book_name, cover: `/api/img?url=${encodeURIComponent(i.thumb_url)}`, episodes: parseInt(i.last_chapter_index) || 0 })) })
+    const data = await Promise.all(books.map(async i => ({
+      id: i.book_id, title: i.book_name, cover: await fetchImg(i.thumb_url), episodes: parseInt(i.last_chapter_index) || 0
+    })))
+    res.json({ data })
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
@@ -28,7 +49,11 @@ app.get('/api/search', async (req, res) => {
   try {
     const r = await fetch(`${API_URL}/search?query=${encodeURIComponent(q)}&lang=${lang}`, { headers: HEADERS })
     const json = await r.json()
-    res.json({ data: (json.items || []).filter(i => i.cover).map(i => ({ id: i.book_id, title: i.title, cover: `/api/img?url=${encodeURIComponent(i.cover)}`, episodes: 0 })) })
+    const items = (json.items || []).filter(i => i.cover)
+    const data = await Promise.all(items.map(async i => ({
+      id: i.book_id, title: i.title, cover: await fetchImg(i.cover), episodes: 0
+    })))
+    res.json({ data })
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
@@ -39,7 +64,7 @@ app.get('/api/book', async (req, res) => {
     const r = await fetch(`${API_URL}/series?series_id=${id}&lang=${lang}`, { headers: HEADERS })
     const json = await r.json()
     const s = json.series || {}
-    res.json({ data: { id: String(s.series_id), title: s.title, cover: `/api/img?url=${encodeURIComponent(s.cover)}`, description: s.intro, episodes: s.episode_count } })
+    res.json({ data: { id: String(s.series_id), title: s.title, cover: await fetchImg(s.cover), description: s.intro, episodes: s.episode_count } })
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
@@ -72,21 +97,8 @@ app.get('/api/img', async (req, res) => {
   const { url } = req.query
   if (!url) return res.status(400).send('Missing url')
   try {
-    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
+    const r = await fetch(`${API_URL}/img?url=${encodeURIComponent(url)}`, { headers: HEADERS })
     const buffer = Buffer.from(await r.arrayBuffer())
-    
-    if (url.includes('.heic')) {
-      const tmp = `/tmp/img_${Date.now()}`
-      writeFileSync(`${tmp}.heic`, buffer)
-      execSync(`convert ${tmp}.heic ${tmp}.jpg`)
-      const jpg = readFileSync(`${tmp}.jpg`)
-      unlinkSync(`${tmp}.heic`)
-      unlinkSync(`${tmp}.jpg`)
-      res.set('Content-Type', 'image/jpeg')
-      res.set('Cache-Control', 'public, max-age=86400')
-      return res.send(jpg)
-    }
-    
     res.set('Content-Type', r.headers.get('content-type') || 'image/jpeg')
     res.set('Cache-Control', 'public, max-age=86400')
     res.send(buffer)

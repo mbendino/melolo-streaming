@@ -1,18 +1,16 @@
-const API_URL = 'https://captain.sapimu.au/melolo/api/v1'
-const TOKEN = process.env.AUTH_TOKEN
-const HEADERS = {
-  Authorization: `Bearer ${TOKEN}`,
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-}
+import convert from 'heic-convert'
 
 export default async function handler(req, res) {
   const { url } = req.query
   if (!url) return res.status(400).send('Missing url')
   try {
-    const r = await fetch(`${API_URL}/img?url=${encodeURIComponent(url)}`, { headers: HEADERS })
-    const buffer = await r.arrayBuffer()
-    res.setHeader('Content-Type', r.headers.get('content-type') || 'image/jpeg')
+    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
+    let buffer = Buffer.from(await r.arrayBuffer())
+    if (url.includes('.heic')) {
+      buffer = Buffer.from(await convert({ buffer, format: 'JPEG', quality: 0.8 }))
+    }
+    res.setHeader('Content-Type', 'image/jpeg')
     res.setHeader('Cache-Control', 'public, max-age=86400')
-    res.send(Buffer.from(buffer))
+    res.send(buffer)
   } catch (err) { res.status(500).send(err.message) }
 }
